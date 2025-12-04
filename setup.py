@@ -24,7 +24,7 @@ if requirements_file.exists():
 
 setup(
     name="diskrim",
-    version="0.1.0",
+    version="1.0.0",
     description="Modern open-source partition manager with GUI and CLI",
     long_description=long_description,
     long_description_content_type="text/markdown",
@@ -39,6 +39,8 @@ setup(
     entry_points={
         "console_scripts": [
             "diskrim=partition_manager.cli.main:cli",
+        ],
+        "gui_scripts": [
             "diskrim-gui=partition_manager.gui.main_window:main",
         ],
     },
