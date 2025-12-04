@@ -1,5 +1,7 @@
 # DiskRim Development
 
+/partition_manager
+
 # Compiled Python
 __pycache__/
 *.py[cod]
