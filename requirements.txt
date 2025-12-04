@@ -1,0 +1,26 @@
+# Core Dependencies
+PySide6>=6.6.0          # Qt6 GUI framework
+click>=8.1.0            # CLI framework
+psutil>=5.9.0           # System and process utilities
+
+# Disk Operations (Windows)
+wmi>=1.5.1; sys_platform == 'win32'              # Windows Management Instrumentation
+pywin32>=306; sys_platform == 'win32'            # Win32 API access
+
+# Logging & Database
+colorlog>=6.8.0         # Colored logging output
+
+# Security & Validation
+pycryptodome>=3.19.0    # Cryptographic hashing (MD5, SHA256)
+
+# Development Dependencies
+pytest>=7.4.0           # Testing framework
+pytest-cov>=4.1.0       # Code coverage
+pytest-qt>=4.2.0        # Qt testing utilities
+black>=23.0.0           # Code formatting
+flake8>=6.1.0           # Code linting
+mypy>=1.7.0             # Type checking
+
+# Optional Dependencies
+Pillow>=10.1.0          # Image handling for icons
+humanize>=4.9.0         # Human-readable sizes and times
