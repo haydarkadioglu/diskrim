@@ -132,45 +132,113 @@ class PartitionOperations:
             # Extract disk number from disk ID (e.g., \\.\PhysicalDrive0 -> 0)
             disk_num = disk_id.split('PhysicalDrive')[-1]
             
-            # Create diskpart script
+            # Create diskpart script with automatic letter assignment
             script = f"""select disk {disk_num}
 create partition {partition_type} size={size // (1024 * 1024)}
+assign
 """
             
             if progress_callback:
                 progress_callback(30, "Creating partition...")
             
-            # Execute diskpart
+            # Map filesystem to diskpart format type
+            fs_map = {
+                FilesystemType.NTFS: 'ntfs',
+                FilesystemType.FAT32: 'fat32',
+                FilesystemType.EXFAT: 'exfat',
+                FilesystemType.FAT: 'fat',
+            }
+            
+            fs_type = fs_map.get(filesystem, 'ntfs')
+            
+            # Create diskpart script that creates, assigns letter, AND formats in one go
+            quick_flag = 'quick' if True else ''
+            label_part = f' label="{label}"' if label else ''
+            
+            script = f"""select disk {disk_num}
+create partition {partition_type} size={size // (1024 * 1024)}
+assign
+format fs={fs_type} {quick_flag}{label_part}
+"""
+            
+            if progress_callback:
+                progress_callback(50, "Creating and formatting partition...")
+            
+            # Execute diskpart with full script
             result = subprocess.run(
                 ['diskpart'],
                 input=script,
                 capture_output=True,
                 text=True,
-                timeout=60,
+                timeout=300,  # Format can take time
                 creationflags=CREATE_NO_WINDOW
             )
             
             if result.returncode != 0:
+                logger.error(f"Diskpart failed: {result.stderr}")
                 return False, result.stderr or "Diskpart failed", None
             
+            logger.info(f"Diskpart output: {result.stdout}")
+            
             if progress_callback:
-                progress_callback(60, "Formatting partition...")
+                progress_callback(90, "Detecting drive letter...")
             
-            # Get the new partition (it should be the last one created)
-            # This is a simplification - in production, we'd need to query the partition list
-            partition_id = "NEW_PARTITION"  # Placeholder
+            # Wait for formatting to complete
+            time.sleep(2)
             
-            # Format the partition
-            if filesystem != FilesystemType.UNKNOWN:
-                success, error = self.fs_ops.format_partition(
-                    partition_id,
-                    filesystem,
-                    label=label,
-                    quick=True
-                )
-                
-                if not success:
-                    return False, f"Partition created but format failed: {error}", partition_id
+            # Now find the drive letter
+            list_script = "list volume\n"
+            list_result = subprocess.run(
+                ['diskpart'],
+                input=list_script,
+                capture_output=True,
+                text=True,
+                timeout=10,
+                creationflags=CREATE_NO_WINDOW
+            )
+            
+            logger.debug(f"Volume list:\n{list_result.stdout}")
+            
+            # Find the newly formatted volume (will have filesystem type now, not RAW)
+            partition_id = None
+            lines = list_result.stdout.split('\n')
+            for line in lines:
+                # Look for volume with our filesystem and Healthy status
+                if (fs_type.upper() in line.upper() or filesystem.value.upper() in line.upper()) and 'Healthy' in line:
+                    # Extract drive letter
+                    parts = [p for p in line.split() if p]
+                    if len(parts) >= 3:
+                        for i, part in enumerate(parts):
+                            if part.upper() == 'VOLUME' and i + 2 < len(parts):
+                                potential_letter = parts[i + 2]
+                                if len(potential_letter) == 1 and potential_letter.isalpha():
+                                    partition_id = potential_letter + ':'
+                                    logger.info(f"Found formatted partition: {partition_id}")
+                                    break
+                    if partition_id:
+                        break
+            
+            if not partition_id:
+                # Try one more time - look for the most recent volume
+                logger.warning("Couldn't find drive letter by filesystem, checking all volumes")
+                for line in reversed(lines):  # Check from bottom up
+                    if 'Partition' in line and 'Healthy' in line:
+                        parts = [p for p in line.split() if p]
+                        if len(parts) >= 3:
+                            for i, part in enumerate(parts):
+                                if part.upper() == 'VOLUME' and i + 2 < len(parts):
+                                    potential_letter = parts[i + 2]
+                                    if len(potential_letter) == 1 and potential_letter.isalpha():
+                                        partition_id = potential_letter + ':'
+                                        logger.info(f"Found partition (fallback): {partition_id}")
+                                        break
+                        if partition_id:
+                            break
+            
+            if not partition_id:
+                # Partition was created and formatted, but we don't know the letter
+                logger.error("Created and formatted partition but couldn't detect drive letter")
+                return True, None, "Created (drive letter unknown)"
             
             if progress_callback:
                 progress_callback(100, "Complete")

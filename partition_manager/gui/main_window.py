@@ -439,6 +439,7 @@ class MainWindow(QMainWindow):
         
         if isinstance(data, DiskInfo):
             self.current_disk = data
+            self.current_partition = None  # Clear partition when disk selected
             self.show_disk_details(data)
             self.btn_create.setEnabled(is_admin())
             self.btn_delete.setEnabled(False)
@@ -449,6 +450,10 @@ class MainWindow(QMainWindow):
             parent_item = item.parent()
             if parent_item:
                 self.current_disk = parent_item.data(0, Qt.UserRole)
+            
+            # Show partition details
+            self.show_partition_details(data)
+            
             self.btn_create.setEnabled(False)
             self.btn_delete.setEnabled(is_admin())
             self.btn_resize.setEnabled(is_admin())
@@ -531,6 +536,55 @@ class MainWindow(QMainWindow):
         
         self.details_text.setHtml(details)
     
+    def show_partition_details(self, partition: PartitionInfo):
+        """Display detailed partition information."""
+        self.details_header.setText(f"Partition: {partition.id}")
+        
+        from ..utils.validators import PartitionValidator
+        
+        details = f"""
+<h2>Partition Information</h2>
+<table style="width: 100%; border-collapse: collapse;">
+<tr>
+    <td style="padding: 8px; font-weight: bold;">ID:</td>
+    <td style="padding: 8px;">{partition.id}</td>
+</tr>
+<tr>
+    <td style="padding: 8px; font-weight: bold;">Size:</td>
+    <td style="padding: 8px;">{PartitionValidator.format_size(partition.size)}</td>
+</tr>
+<tr>
+    <td style="padding: 8px; font-weight: bold;">Filesystem:</td>
+    <td style="padding: 8px;">{partition.filesystem.value.upper()}</td>
+</tr>
+<tr>
+    <td style="padding: 8px; font-weight: bold;">Label:</td>
+    <td style="padding: 8px;">{partition.label if partition.label else 'None'}</td>
+</tr>
+"""
+        
+        if partition.mount_point:
+            details += f"""
+<tr>
+    <td style="padding: 8px; font-weight: bold;">Mount Point:</td>
+    <td style="padding: 8px;">{partition.mount_point}</td>
+</tr>
+"""
+        
+        if partition.uuid:
+            details += f"""
+<tr>
+    <td style="padding: 8px; font-weight: bold;">UUID:</td>
+    <td style="padding: 8px;">{partition.uuid}</td>
+</tr>
+"""
+        
+        details += """
+</table>
+"""
+        
+        self.details_text.setHtml(details)
+    
     # Operation methods
     def create_partition(self):
         """Create a new partition with dialog."""
@@ -565,6 +619,12 @@ class MainWindow(QMainWindow):
         info_label = QLabel(f"💾 Available Space: {available_mb:,} MB ({available_gb:.2f} GB)")
         info_label.setStyleSheet("color: #4CAF50; font-weight: bold; padding: 5px;")
         layout.addWidget(info_label)
+        
+        # USB warning if removable disk
+        if self.current_disk.is_removable:
+            usb_warning = QLabel("⚠️ USB Drive Detected: FAT32 or exFAT recommended for compatibility")
+            usb_warning.setStyleSheet("color: #FF9800; font-size: 11px; padding: 5px;")
+            layout.addWidget(usb_warning)
         
         form = QFormLayout()
         
@@ -618,7 +678,12 @@ class MainWindow(QMainWindow):
         
         # Filesystem type
         fs_combo = QComboBox()
-        fs_combo.addItems(["NTFS", "FAT32", "exFAT", "EXT4", "EXT3"])
+        if self.current_disk.is_removable:
+            # For USB drives, recommend FAT32/exFAT first
+            fs_combo.addItems(["FAT32", "exFAT", "NTFS", "EXT4", "EXT3"])
+        else:
+            # For internal drives, NTFS first
+            fs_combo.addItems(["NTFS", "FAT32", "exFAT", "EXT4", "EXT3"])
         form.addRow("Filesystem:", fs_combo)
         
         # Label
