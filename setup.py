@@ -24,7 +24,7 @@ if requirements_file.exists():
 
 setup(
     name="diskrim",
-    version="1.0.0",
+    version="1.5.0",
     description="Modern open-source partition manager with GUI and CLI",
     long_description=long_description,
     long_description_content_type="text/markdown",

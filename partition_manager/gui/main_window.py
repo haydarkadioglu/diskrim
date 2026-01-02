@@ -20,8 +20,10 @@ from PySide6.QtGui import QAction, QIcon, QFont
 
 from ..utils.platform_check import is_admin, get_platform, OSType
 from ..utils.logger import setup_logger, get_logger, LogLevel
-from ..backend.disk_enumerator import DiskEnumerator, DiskInfo
-from ..utils.validators import PartitionValidator
+from ..backend.disk_enumerator import DiskEnumerator, DiskInfo, PartitionInfo
+from ..backend.partition_ops import PartitionOperations
+from ..backend.filesystem_ops import FilesystemOperations
+from ..utils.validators import PartitionValidator, FilesystemType
 
 logger = get_logger(__name__)
 
@@ -108,7 +110,10 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.os_platform = get_platform()
         self.disk_enumerator = DiskEnumerator()
+        self.partition_ops = PartitionOperations()
+        self.filesystem_ops = FilesystemOperations()
         self.current_disk: Optional[DiskInfo] = None
+        self.current_partition: Optional[PartitionInfo] = None
         
         self.init_ui()
         self.check_permissions()
@@ -440,6 +445,10 @@ class MainWindow(QMainWindow):
             self.btn_resize.setEnabled(False)
         else:
             # Partition selected
+            self.current_partition = data
+            parent_item = item.parent()
+            if parent_item:
+                self.current_disk = parent_item.data(0, Qt.UserRole)
             self.btn_create.setEnabled(False)
             self.btn_delete.setEnabled(is_admin())
             self.btn_resize.setEnabled(is_admin())
@@ -522,15 +531,292 @@ class MainWindow(QMainWindow):
         
         self.details_text.setHtml(details)
     
-    # Placeholder methods for operations
+    # Operation methods
     def create_partition(self):
-        QMessageBox.information(self, "Coming Soon", "Partition creation will be implemented soon!")
+        """Create a new partition with dialog."""
+        if not self.current_disk:
+            QMessageBox.warning(self, "No Selection", "Please select a disk to create a partition on.")
+            return
+        
+        if not is_admin():
+            QMessageBox.warning(self, "Permission Denied", "Administrator/root privileges required for this operation.")
+            return
+        
+        from PySide6.QtWidgets import QDialog, QVBoxLayout, QFormLayout, QComboBox, QLineEdit, QDialogButtonBox, QSpinBox, QSlider, QLabel, QHBoxLayout
+        
+        # Calculate available space
+        used_space = sum(p.size for p in self.current_disk.partitions)
+        available_space = self.current_disk.size - used_space
+        available_mb = int(available_space / (1024 * 1024))
+        available_gb = available_space / (1024**3)
+        
+        if available_mb < 100:
+            QMessageBox.warning(self, "No Space", f"Not enough free space on disk.\n\nAvailable: {available_mb} MB")
+            return
+        
+        # Create dialog
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Create Partition")
+        dialog.setMinimumWidth(500)
+        
+        layout = QVBoxLayout()
+        
+        # Available space info
+        info_label = QLabel(f"💾 Available Space: {available_mb:,} MB ({available_gb:.2f} GB)")
+        info_label.setStyleSheet("color: #4CAF50; font-weight: bold; padding: 5px;")
+        layout.addWidget(info_label)
+        
+        form = QFormLayout()
+        
+        # Size with slider
+        size_layout = QVBoxLayout()
+        
+        # SpinBox and GB label in horizontal layout
+        size_input_layout = QHBoxLayout()
+        size_input = QSpinBox()
+        size_input.setRange(100, available_mb)
+        size_input.setValue(min(10240, available_mb))  # Default 10 GB or max
+        size_input.setSuffix(" MB")
+        size_input.setMaximumWidth(150)
+        
+        size_gb_label = QLabel()
+        size_gb_label.setStyleSheet("color: #888; margin-left: 10px;")
+        
+        def update_gb_label():
+            gb = size_input.value() / 1024
+            size_gb_label.setText(f"≈ {gb:.2f} GB")
+        
+        update_gb_label()
+        
+        size_input_layout.addWidget(size_input)
+        size_input_layout.addWidget(size_gb_label)
+        size_input_layout.addStretch()
+        
+        # Slider
+        size_slider = QSlider(Qt.Horizontal)
+        size_slider.setRange(100, available_mb)
+        size_slider.setValue(size_input.value())
+        size_slider.setTickPosition(QSlider.TicksBelow)
+        size_slider.setTickInterval(available_mb // 10)
+        
+        # Sync slider and spinbox
+        def on_slider_change(value):
+            size_input.setValue(value)
+            update_gb_label()
+        
+        def on_spinbox_change(value):
+            size_slider.setValue(value)
+            update_gb_label()
+        
+        size_slider.valueChanged.connect(on_slider_change)
+        size_input.valueChanged.connect(on_spinbox_change)
+        
+        size_layout.addLayout(size_input_layout)
+        size_layout.addWidget(size_slider)
+        
+        form.addRow("Size:", size_layout)
+        
+        # Filesystem type
+        fs_combo = QComboBox()
+        fs_combo.addItems(["NTFS", "FAT32", "exFAT", "EXT4", "EXT3"])
+        form.addRow("Filesystem:", fs_combo)
+        
+        # Label
+        label_input = QLineEdit()
+        label_input.setPlaceholderText("Partition Label (optional)")
+        form.addRow("Label:", label_input)
+        
+        # Partition type
+        type_combo = QComboBox()
+        type_combo.addItems(["primary", "logical"])
+        form.addRow("Type:", type_combo)
+        
+        layout.addLayout(form)
+        
+        # Buttons
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+        
+        dialog.setLayout(layout)
+        
+        # Show dialog
+        if dialog.exec() != QDialog.Accepted:
+            return
+        
+        # Get values
+        size_mb = size_input.value()
+        size_bytes = size_mb * 1024 * 1024
+        
+        fs_str = fs_combo.currentText().lower()
+        fs_map = {
+            'ntfs': FilesystemType.NTFS,
+            'fat32': FilesystemType.FAT32,
+            'exfat': FilesystemType.EXFAT,
+            'ext4': FilesystemType.EXT4,
+            'ext3': FilesystemType.EXT3,
+        }
+        filesystem = fs_map.get(fs_str, FilesystemType.NTFS)
+        
+        label = label_input.text().strip() or None
+        partition_type = type_combo.currentText()
+        
+        # Confirm
+        size_gb = size_bytes / (1024**3)
+        reply = QMessageBox.question(
+            self,
+            "Confirm Creation",
+            f"Create partition on {self.current_disk.id}:\n\n"
+            f"Size: {size_mb:,} MB ({size_gb:.2f} GB)\n"
+            f"Filesystem: {fs_combo.currentText()}\n"
+            f"Label: {label or 'None'}\n"
+            f"Type: {partition_type}\n\n"
+            "Continue?",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        
+        if reply != QMessageBox.Yes:
+            return
+        
+        # Perform creation
+        self.log_text.append(f"Creating partition on {self.current_disk.id}...")
+        
+        success, error, part_id = self.partition_ops.create_partition(
+            disk_id=self.current_disk.id,
+            size=size_bytes,
+            filesystem=filesystem,
+            label=label,
+            partition_type=partition_type,
+            progress_callback=lambda pct, msg: self.log_text.append(f"[{pct}%] {msg}")
+        )
+        
+        if success:
+            QMessageBox.information(self, "Success", f"Partition created successfully: {part_id}")
+            self.log_text.append("✓ Partition created successfully")
+            self.load_disks()  # Refresh
+        else:
+            QMessageBox.critical(self, "Error", f"Failed to create partition:\n\n{error}")
+            self.log_text.append(f"❌ Error: {error}")
     
     def delete_partition(self):
-        QMessageBox.information(self, "Coming Soon", "Partition deletion will be implemented soon!")
+        """Delete selected partition with confirmation."""
+        if not self.current_partition:
+            QMessageBox.warning(self, "No Selection", "Please select a partition to delete.")
+            return
+        
+        if not is_admin():
+            QMessageBox.warning(self, "Permission Denied", "Administrator/root privileges required for this operation.")
+            return
+        
+        # Confirmation dialog
+        msg = QMessageBox(self)
+        msg.setIcon(QMessageBox.Warning)
+        msg.setWindowTitle("Confirm Deletion")
+        msg.setText(f"Are you sure you want to delete partition:\n\n{self.current_partition.id}")
+        msg.setInformativeText(
+            f"Filesystem: {self.current_partition.filesystem.value}\n"
+            f"Size: {PartitionValidator.format_size(self.current_partition.size)}\n\n"
+            "⚠ This action cannot be undone!\n\n"
+            "All data on this partition will be lost."
+        )
+        
+        # Add secure wipe option
+        secure_btn = msg.addButton("Secure Delete (3-pass wipe)", QMessageBox.DestructiveRole)
+        normal_btn = msg.addButton("Delete", QMessageBox.DestructiveRole)
+        cancel_btn = msg.addButton("Cancel", QMessageBox.RejectRole)
+        msg.setDefaultButton(cancel_btn)
+        
+        msg.exec()
+        
+        if msg.clickedButton() == cancel_btn:
+            return
+        
+        secure_wipe = (msg.clickedButton() == secure_btn)
+        
+        # Perform deletion
+        self.log_text.append(f"Deleting partition {self.current_partition.id}...")
+        
+        success, error = self.partition_ops.delete_partition(
+            partition_id=self.current_partition.id,
+            secure_wipe=secure_wipe,
+            wipe_passes=3 if secure_wipe else 0,
+            progress_callback=lambda pct, msg: self.log_text.append(f"[{pct}%] {msg}")
+        )
+        
+        if success:
+            QMessageBox.information(self, "Success", f"Partition {self.current_partition.id} deleted successfully.")
+            self.log_text.append("✓ Partition deleted successfully")
+            self.load_disks()  # Refresh
+        else:
+            QMessageBox.critical(self, "Error", f"Failed to delete partition:\n\n{error}")
+            self.log_text.append(f"❌ Error: {error}")
     
     def resize_partition(self):
-        QMessageBox.information(self, "Coming Soon", "Partition resize will be implemented soon!")
+        """Resize selected partition with simple dialog."""
+        if not self.current_partition:
+            QMessageBox.warning(self, "No Selection", "Please select a partition to resize.")
+            return
+        
+        if not is_admin():
+            QMessageBox.warning(self, "Permission Denied", "Administrator/root privileges required for this operation.")
+            return
+        
+        from PySide6.QtWidgets import QInputDialog
+        
+        # Calculate current size in MB and GB
+        current_size_mb = self.current_partition.size / (1024**2)
+        current_size_gb = self.current_partition.size / (1024**3)
+        
+        # Show input dialog for new size in MB
+        new_size_mb, ok = QInputDialog.getDouble(
+            self,
+            "Resize Partition",
+            f"Current size: {current_size_mb:.0f} MB ({current_size_gb:.2f} GB)\n\nEnter new size (MB):",
+            value=current_size_mb,
+            min=1.0,
+            max=10000000.0,  # ~10TB
+            decimals=0
+        )
+        
+        if not ok:
+            return
+        
+        new_size_bytes = int(new_size_mb * (1024**2))
+        new_size_gb = new_size_bytes / (1024**3)
+        
+        # Confirm with both MB and GB display
+        reply = QMessageBox.question(
+            self,
+            "Confirm Resize",
+            f"Resize partition {self.current_partition.id}:\n\n"
+            f"From: {current_size_mb:.0f} MB ({current_size_gb:.2f} GB)\n"
+            f"To: {new_size_mb:.0f} MB ({new_size_gb:.2f} GB)\n\n"
+            "This operation may take several minutes.\n"
+            "Continue?",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        
+        if reply != QMessageBox.Yes:
+            return
+        
+        # Perform resize
+        self.log_text.append(f"Resizing partition {self.current_partition.id}...")
+        
+        success, error = self.partition_ops.resize_partition(
+            partition_id=self.current_partition.id,
+            new_size=new_size_bytes,
+            filesystem=self.current_partition.filesystem,
+            progress_callback=lambda pct, msg: self.log_text.append(f"[{pct}%] {msg}")
+        )
+        
+        if success:
+            QMessageBox.information(self, "Success", f"Partition resized successfully to {new_size_mb:.0f} MB ({new_size_gb:.2f} GB).")
+            self.log_text.append("✓ Partition resized successfully")
+            self.load_disks()  # Refresh
+        else:
+            QMessageBox.critical(self, "Error", f"Failed to resize partition:\n\n{error}")
+            self.log_text.append(f"❌ Error: {error}")
     
     def format_partition(self):
         QMessageBox.information(self, "Coming Soon", "Partition format will be implemented soon!")

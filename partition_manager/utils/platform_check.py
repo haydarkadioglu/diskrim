@@ -14,6 +14,9 @@ from typing import Optional, List, Dict, Tuple
 from dataclasses import dataclass
 from enum import Enum
 
+# Windows-specific flag to prevent console window popup
+CREATE_NO_WINDOW = 0x08000000 if sys.platform == 'win32' else 0
+
 
 class OSType(Enum):
     """Operating system types."""
@@ -111,7 +114,8 @@ def detect_boot_mode() -> BootMode:
                     ["bcdedit"],
                     capture_output=True,
                     text=True,
-                    timeout=5
+                    timeout=5,
+                    creationflags=CREATE_NO_WINDOW
                 )
                 if "path" in result.stdout.lower() and "efi" in result.stdout.lower():
                     return BootMode.UEFI

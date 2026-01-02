@@ -6,6 +6,7 @@ providing unified disk information API.
 """
 
 import subprocess
+import sys
 import json
 from typing import List, Dict, Optional, Any
 from dataclasses import dataclass, field
@@ -16,6 +17,9 @@ from ..utils.logger import get_logger
 from ..utils.validators import FilesystemType
 
 logger = get_logger(__name__)
+
+# Windows-specific flag to prevent console window popup
+CREATE_NO_WINDOW = 0x08000000 if sys.platform == 'win32' else 0
 
 
 class DiskType(Enum):
@@ -368,7 +372,8 @@ class DiskEnumerator:
                 input=script,
                 capture_output=True,
                 text=True,
-                timeout=5
+                timeout=5,
+                creationflags=CREATE_NO_WINDOW
             )
             
             output = result.stdout.lower()
@@ -458,7 +463,8 @@ class DiskEnumerator:
                 ["wmic", "diskdrive", "get", "index,model,size", "/format:csv"],
                 capture_output=True,
                 text=True,
-                timeout=10
+                timeout=10,
+                creationflags=CREATE_NO_WINDOW
             )
             
             if result.returncode != 0:

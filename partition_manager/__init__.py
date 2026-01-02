@@ -5,7 +5,7 @@ A cross-platform partition manager with GUI and CLI interfaces,
 supporting Windows and Linux operating systems.
 """
 
-__version__ = "1.0.0"
+__version__ = "1.5.0"
 __author__ = "DiskRim Contributors"
 __license__ = "MIT"
 

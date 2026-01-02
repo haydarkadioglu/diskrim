@@ -34,7 +34,7 @@ def require_admin_decorator(f):
 
 
 @click.group()
-@click.version_option(version="1.0.0", prog_name="DiskRim")
+@click.version_option(version="1.5.0", prog_name="DiskRim")
 @click.option('--verbose', '-v', is_flag=True, help='Enable verbose output')
 @click.option('--debug', is_flag=True, help='Enable debug output')
 def cli(verbose: bool, debug: bool):
