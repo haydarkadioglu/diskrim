@@ -164,6 +164,135 @@ DiskRim implements multiple safety layers:
 4. **Snapshot System**: Creates recovery points before modifications
 5. **Operation Logging**: Full audit trail for forensics
 
+## 🔧 Troubleshooting
+
+### Common Issues
+
+#### ImportError: attempted relative import with no known parent package
+
+**Error:**
+```
+ImportError: attempted relative import with no known parent package
+```
+
+**Cause:** Running Python files directly instead of using the launcher scripts.
+
+**Solution:**
+```bash
+# ✅ CORRECT - Use launcher scripts
+python run_gui.py          # For GUI
+python run_cli.py          # For CLI
+
+# ❌ WRONG - Don't run files directly
+python partition_manager/gui/main_window.py
+python partition_manager/cli/main.py
+```
+
+#### GUI Doesn't Start (Windows)
+
+**Issue:** GUI window doesn't appear or closes immediately.
+
+**Solutions:**
+1. **Run as Administrator:**
+   ```cmd
+   # Right-click on Command Prompt → Run as Administrator
+   cd C:\path\to\diskrim
+   python run_gui.py
+   ```
+
+2. **Check UAC Settings:**
+   - If UAC prompt is cancelled, GUI runs in limited mode
+   - Some operations won't work without admin privileges
+
+3. **Check Dependencies:**
+   ```bash
+   pip install --upgrade PySide6
+   ```
+
+#### Partition Creation Fails (WinError 2)
+
+**Error:**
+```
+Partition created but format failed: [WinError 2] The system cannot find the file specified
+```
+
+**Cause:** Drive letter detection issue after partition creation.
+
+**Workaround:**
+1. Partition is actually created (check Disk Management)
+2. Manually assign a drive letter in Windows Disk Management
+3. Or: Use FAT32/exFAT for USB drives (better compatibility)
+
+**Fix:** This is resolved in v1.5.0 by using diskpart format directly.
+
+#### Permission Denied Errors
+
+**Linux:**
+```bash
+# Run with sudo
+sudo python run_gui.py
+sudo diskrim disk list
+```
+
+**Windows:**
+```cmd
+# Run PowerShell/CMD as Administrator
+diskrim-gui
+```
+
+#### Console Windows Appearing (Windows)
+
+**Issue:** Black console windows flash during operations.
+
+**Status:** Fixed in v1.5.0 - all subprocess calls use `CREATE_NO_WINDOW` flag.
+
+If still appearing:
+- Update to latest version
+- Check if antivirus is interfering
+
+#### USB Drive Not Detected
+
+**Solutions:**
+1. **Refresh Disk List:**
+   - Click "Refresh" button in GUI
+   - Or restart application
+
+2. **Check USB Connection:**
+   ```bash
+   # Windows
+   diskpart
+   list disk
+   
+   # Linux
+   sudo lsblk
+   ```
+
+3. **Check Disk Management (Windows):**
+   - Win+X → Disk Management
+   - Check if disk is "Online"
+
+### Reporting Issues
+
+If you encounter an issue not listed here:
+
+1. **Check Logs:**
+   ```
+   Windows: C:\Users\<user>\.diskrim\diskrim.log
+   Linux: ~/.diskrim/diskrim.log
+   ```
+
+2. **Collect Information:**
+   - DiskRim version (check title bar or `--version`)
+   - Operating system and version
+   - Error message (screenshot helpful)
+   - Steps to reproduce
+
+3. **Report:**
+   - [GitHub Issues](https://github.com/haydarkadioglu/diskrim/issues)
+   - Include log file if possible
+   - Describe what you expected vs what happened
+
+
 ## 🤝 Contributing
 
 Contributions are welcome! Please read our [Contributing Guidelines](CONTRIBUTING.md) first.
